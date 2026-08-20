@@ -26,24 +26,41 @@ async function openRouterJson<T>(messages: OpenRouterMessage[], schemaName: stri
   return JSON.parse(content) as T;
 }
 
-export type RefinedStatement = { refinedStatement: string; searchFocus: string[]; exclusions: string[]; clarification: string | null };
+export type RefinedStatement = {
+  refinedStatement: string;
+  searchFocus: string[];
+  capabilities: string[];
+  useCases: string[];
+  industryContext: string[];
+  geography: string[];
+  evidenceRequirements: string[];
+  retrievalTerms: string[];
+  exclusions: string[];
+  clarification: string | null;
+};
 
 export async function refineCompanyStatement(statement: string): Promise<RefinedStatement> {
   const result = await openRouterJson<RefinedStatement>([
-    { role: "system", content: "You turn a user's company-discovery request into a concise, faithful semantic-search statement. Preserve the user's intent; do not invent requirements. Return English when the source is English, Chinese when the source is Chinese, and keep any important multilingual terms. Do not give recommendations." },
+    { role: "system", content: "You turn a user's company-discovery request into a rich but faithful semantic-search representation. Preserve every relevant user intent, including capabilities, product or service types, application scenarios, industries, geographies, evidence expectations, preferred operating models, and exclusions. Do not invent requirements. The refinedStatement must be a coherent semantic-search paragraph that keeps important multilingual terms. Return English when the source is English, Chinese when the source is Chinese. Do not recommend companies." },
     { role: "user", content: statement },
   ], "refined_company_statement", {
     type: "object",
     properties: {
-      refinedStatement: { type: "string", minLength: 8, maxLength: 1000 },
+      refinedStatement: { type: "string", minLength: 8, maxLength: 6000 },
       searchFocus: { type: "array", items: { type: "string", maxLength: 120 }, maxItems: 8 },
+      capabilities: { type: "array", items: { type: "string", maxLength: 160 }, maxItems: 12 },
+      useCases: { type: "array", items: { type: "string", maxLength: 160 }, maxItems: 10 },
+      industryContext: { type: "array", items: { type: "string", maxLength: 160 }, maxItems: 10 },
+      geography: { type: "array", items: { type: "string", maxLength: 160 }, maxItems: 8 },
+      evidenceRequirements: { type: "array", items: { type: "string", maxLength: 180 }, maxItems: 8 },
+      retrievalTerms: { type: "array", items: { type: "string", maxLength: 160 }, maxItems: 18 },
       exclusions: { type: "array", items: { type: "string", maxLength: 120 }, maxItems: 8 },
       clarification: { anyOf: [{ type: "string", maxLength: 280 }, { type: "null" }] },
     },
-    required: ["refinedStatement", "searchFocus", "exclusions", "clarification"],
+    required: ["refinedStatement", "searchFocus", "capabilities", "useCases", "industryContext", "geography", "evidenceRequirements", "retrievalTerms", "exclusions", "clarification"],
     additionalProperties: false,
   });
-  return { ...result, refinedStatement: result.refinedStatement.trim().slice(0, 1000) };
+  return { ...result, refinedStatement: result.refinedStatement.trim() };
 }
 
 function companySnapshot(profile: Profile) {

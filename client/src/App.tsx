@@ -7,6 +7,7 @@ import Profiles from "@/pages/Profiles";
 import Saved from "@/pages/Saved";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { LocaleProvider } from "./contexts/LocaleContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 
 function Router() {
@@ -14,5 +15,5 @@ function Router() {
 }
 
 export default function App() {
-  return <ErrorBoundary><ThemeProvider defaultTheme="light"><TooltipProvider><Toaster richColors position="top-right" /><Router /></TooltipProvider></ThemeProvider></ErrorBoundary>;
+  return <ErrorBoundary><ThemeProvider defaultTheme="light"><LocaleProvider><TooltipProvider><Toaster richColors position="top-right" /><Router /></TooltipProvider></LocaleProvider></ThemeProvider></ErrorBoundary>;
 }

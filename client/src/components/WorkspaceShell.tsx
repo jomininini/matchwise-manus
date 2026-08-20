@@ -1,7 +1,5 @@
-import { useAuth } from "@/_core/hooks/useAuth";
-import { startLogin } from "@/const";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { useLocale } from "@/contexts/LocaleContext";
 import {
   Archive,
   ArrowUpRight,
@@ -16,15 +14,10 @@ import {
   ShieldCheck,
   Sparkles,
   X,
+  Languages,
 } from "lucide-react";
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-
-const navItems = [
-  { icon: LayoutDashboard, label: "Company Match", path: "/company-match" },
-  { icon: Building2, label: "Company directory", path: "/profiles?type=company" },
-  { icon: Bookmark, label: "Saved", path: "/saved" },
-];
 
 export function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
@@ -53,13 +46,18 @@ export default function WorkspaceShell({
   title?: string;
   action?: React.ReactNode;
 }) {
-  const { user, loading, logout } = useAuth();
+  const { t, locale, toggleLocale } = useLocale();
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const navItems = [
+    { icon: LayoutDashboard, label: t.companyMatch, path: "/company-match" },
+    { icon: Building2, label: t.companyDirectory, path: "/profiles?type=company" },
+    { icon: Bookmark, label: t.saved, path: "/saved" },
+  ];
 
   const navigation = (
     <nav className="flex flex-1 flex-col gap-1">
-      <p className="px-3 pb-2 pt-5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#8d94a6]">Workspace</p>
+      <p className="px-3 pb-2 pt-5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#8d94a6]">{t.workspace}</p>
       {navItems.map(item => {
         const active = item.path === "/" ? location === "/" : location.startsWith(item.path.split("?")[0]);
         return (
@@ -79,11 +77,11 @@ export default function WorkspaceShell({
         <BrandMark />
         {navigation}
         <div className="mt-auto rounded-2xl border border-[#e0e4ee] bg-white/80 p-3.5">
-          <div className="mb-3 flex items-center gap-2 text-[#53618a]"><Sparkles className="size-3.5" /><span className="text-xs font-semibold">AI matching ready</span></div>
-          <p className="text-[11px] leading-relaxed text-[#7c8496]">Ranked introductions grounded in the active HKSTP datasets.</p>
+          <div className="mb-3 flex items-center gap-2 text-[#53618a]"><Sparkles className="size-3.5" /><span className="text-xs font-semibold">{t.aiReady}</span></div>
+          <p className="text-[11px] leading-relaxed text-[#7c8496]">{t.aiReadyCopy}</p>
         </div>
         <Link href="/admin" className={cn("mt-3 flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold transition-colors", location.startsWith("/admin") ? "bg-[#e8ebf7] text-[#31448f]" : "text-[#7c8493] hover:bg-white hover:text-[#3c4e92]")}>
-          <ShieldCheck className="size-4" /> Dataset administration
+          <ShieldCheck className="size-4" /> {t.dataManagement}
         </Link>
       </aside>
 
@@ -96,9 +94,7 @@ export default function WorkspaceShell({
               {title && <h1 className="truncate text-lg font-semibold tracking-[-0.035em] text-[#1c2546] sm:text-xl">{title}</h1>}
             </div>
           </div>
-          <div className="flex items-center gap-2.5">{action}
-            {!loading && (user ? <div className="group relative"><button className="flex h-10 items-center gap-2 rounded-xl border border-[#e3e6ef] bg-white px-2.5 text-left transition-shadow hover:shadow-sm"><span className="grid size-6 place-items-center rounded-lg bg-[#eef0fa] text-[10px] font-bold text-[#394b97]">{(user.name ?? "M").slice(0, 1).toUpperCase()}</span><span className="hidden max-w-28 truncate text-xs font-semibold text-[#3f485e] sm:block">{user.name ?? "Member"}</span></button><div className="invisible absolute right-0 top-11 w-40 rounded-xl border border-[#e4e7ef] bg-white p-1.5 opacity-0 shadow-xl transition-all group-hover:visible group-hover:opacity-100"><button className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-[#6b7283] hover:bg-[#f3f5fa]" onClick={logout}>Sign out</button></div></div> : <Button onClick={() => startLogin()} className="h-10 rounded-xl bg-[#1d2b5c] px-4 text-xs font-semibold text-white hover:bg-[#263772]">Sign in</Button>)}
-          </div>
+          <div className="flex items-center gap-2.5">{action}<button onClick={toggleLocale} className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-[#e3e6ef] bg-white px-3 text-xs font-bold text-[#465379] hover:bg-[#f1f3f9]" aria-label={locale === "zh" ? "Switch to English" : "切换至中文"}><Languages className="size-3.5" />{t.language}</button></div>
         </header>
         <main className="mx-auto w-full max-w-[1520px] px-5 py-7 sm:px-8 lg:px-10 lg:py-9">{children}</main>
       </div>

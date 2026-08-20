@@ -97,6 +97,27 @@ export const companyEmbeddings = mysqlTable(
   ],
 );
 
+export const companyDataActivities = mysqlTable(
+  "companyDataActivities",
+  {
+    id: varchar("id", { length: 96 }).primaryKey(),
+    profileId: varchar("profileId", { length: 96 }),
+    activityType: mysqlEnum("activityType", ["edit", "enrichment", "vector_update", "official_refresh"]).notNull(),
+    status: mysqlEnum("status", ["draft", "applied", "completed", "failed"]).default("draft").notNull(),
+    sourceLabel: varchar("sourceLabel", { length: 255 }).notNull(),
+    inputData: json("inputData"),
+    outputData: json("outputData"),
+    createdBy: int("createdBy").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    completedAt: timestamp("completedAt"),
+  },
+  table => [
+    index("company_data_activity_profile_idx").on(table.profileId),
+    index("company_data_activity_type_idx").on(table.activityType),
+    index("company_data_activity_created_idx").on(table.createdAt),
+  ],
+);
+
 export const savedItems = mysqlTable(
   "savedItems",
   {
@@ -123,3 +144,4 @@ export type Profile = typeof profiles.$inferSelect;
 export type ProfileSourceType = Profile["sourceType"];
 export type SavedItem = typeof savedItems.$inferSelect;
 export type CompanyEmbedding = typeof companyEmbeddings.$inferSelect;
+export type CompanyDataActivity = typeof companyDataActivities.$inferSelect;

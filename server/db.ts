@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, inArray, like, notInArray, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
+  companyDataActivities,
   companyEmbeddings,
   datasetImports,
   InsertUser,
@@ -257,4 +258,75 @@ export async function saveMatch(input: {
   if (!db) throw new Error("Database is unavailable");
   await db.insert(savedItems).values({ ...input, itemType: "match" });
   return { saved: true };
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function normalizedCompanyText(input: { name: string; sector?: string | null; technology?: string | null; description?: string | null; website?: string | null }) {
+  return [input.name, input.sector, input.technology, input.description, input.website].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+export async function getCompanyManagementSummary() {
+  const db = await getDb();
+  if (!db) return { companyCount: 0, vectorCount: 0, latestImport: undefined, latestActivity: undefined };
+  const [companyRows, vectorRows, latestImportRows, latestActivityRows] = await Promise.all([
+    db.select({ total: count() }).from(profiles).where(eq(profiles.sourceType, "company")),
+    db.select({ total: count() }).from(companyEmbeddings),
+    db.select().from(datasetImports).where(eq(datasetImports.sourceType, "company")).orderBy(desc(datasetImports.createdAt)).limit(1),
+    db.select().from(companyDataActivities).orderBy(desc(companyDataActivities.createdAt)).limit(1),
+  ]);
+  return { companyCount: companyRows[0]?.total ?? 0, vectorCount: vectorRows[0]?.total ?? 0, latestImport: latestImportRows[0], latestActivity: latestActivityRows[0] };
+}
+
+export async function getCompanyDatasetPreview(limit = 20) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({ id: profiles.id, name: profiles.name, sector: profiles.sector, technology: profiles.technology, website: profiles.website, rawData: profiles.rawData, updatedAt: profiles.updatedAt }).from(profiles).where(eq(profiles.sourceType, "company")).orderBy(asc(profiles.name)).limit(Math.min(50, Math.max(1, limit)));
+}
+
+export async function listCompanyDataActivities(profileId?: string, limit = 30) {
+  const db = await getDb();
+  if (!db) return [];
+  const query = db.select().from(companyDataActivities).orderBy(desc(companyDataActivities.createdAt)).limit(Math.min(100, Math.max(1, limit)));
+  return profileId ? query.where(eq(companyDataActivities.profileId, profileId)) : query;
+}
+
+export async function createCompanyDataActivity(input: { id: string; profileId?: string | null; activityType: "edit" | "enrichment" | "vector_update" | "official_refresh"; status: "draft" | "applied" | "completed" | "failed"; sourceLabel: string; inputData?: unknown; outputData?: unknown; createdBy: number; completedAt?: Date | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  await db.insert(companyDataActivities).values({ ...input, profileId: input.profileId ?? null, inputData: input.inputData ?? null, outputData: input.outputData ?? null, completedAt: input.completedAt ?? null });
+  return input.id;
+}
+
+export async function updateCompanyDataActivity(id: string, update: { status?: "draft" | "applied" | "completed" | "failed"; outputData?: unknown; completedAt?: Date | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  await db.update(companyDataActivities).set({ ...update, outputData: update.outputData ?? undefined }).where(eq(companyDataActivities.id, id));
+}
+
+export async function updateCompanyProfile(input: { profileId: string; name?: string; website?: string | null; sector?: string | null; technology?: string | null; description?: string | null; rawPatch?: Record<string, unknown>; importBatchId?: string }) {
+  const current = await getProfile(input.profileId);
+  if (!current || current.sourceType !== "company") return undefined;
+  const next = {
+    name: input.name?.trim() || current.name,
+    website: input.website === undefined ? current.website : input.website?.trim() || null,
+    sector: input.sector === undefined ? current.sector : input.sector?.trim() || null,
+    technology: input.technology === undefined ? current.technology : input.technology?.trim() || null,
+    description: input.description === undefined ? current.description : input.description?.trim() || null,
+  };
+  const rawData = { ...objectValue(current.rawData), ...input.rawPatch, _manualUpdatedAt: new Date().toISOString() };
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  await db.update(profiles).set({ ...next, normalizedText: normalizedCompanyText(next), rawData, importBatchId: input.importBatchId ?? current.importBatchId }).where(eq(profiles.id, input.profileId));
+  return getProfile(input.profileId);
+}
+
+export async function upsertCompanyEmbeddings(embeddings: CompanyEmbeddingInput[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+  for (const embedding of embeddings) {
+    await db.insert(companyEmbeddings).values(embedding).onDuplicateKeyUpdate({ set: { model: sql`VALUES(model)`, inputHash: sql`VALUES(inputHash)`, embedding: sql`VALUES(embedding)`, importBatchId: sql`VALUES(importBatchId)` } });
+  }
 }

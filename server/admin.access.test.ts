@@ -20,9 +20,11 @@ function createNonOwnerContext(): TrpcContext {
   };
 }
 
-describe("admin access control", () => {
-  it("rejects a non-owner before any dataset operation is attempted", async () => {
+describe("public data-management access", () => {
+  it("allows an unauthenticated workspace context to inspect official company imports", async () => {
     const caller = appRouter.createCaller(createNonOwnerContext());
-    await expect(caller.admin.imports()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const imports = await caller.admin.imports();
+    expect(Array.isArray(imports)).toBe(true);
+    expect(imports.every(item => item.sourceType === "company")).toBe(true);
   });
 });
