@@ -1,7 +1,7 @@
-/**
- * Unified type exports
- * Import shared types from this single entry point.
- */
-
-export type * from "../drizzle/schema";
-export * from "./_core/errors";
+export type MatchAnalysis = {
+  score: number;
+  summary: string;
+  strengths: string[];
+  gaps: string[];
+  talkingPoints: string[];
+};

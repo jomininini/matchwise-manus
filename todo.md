@@ -1,0 +1,22 @@
+# Project TODO
+
+- [x] Inspect the supplied Matching repository and profile the HKSTP company, solution, and investor CSV schemas.
+- [x] Define normalized profile, saved-item, and dataset-import data models in the database schema.
+- [x] Build owner-only dataset import controls for company, solution, and investor CSV files.
+- [x] Implement dataset-backed startup and solution browsing with search, filtering, and informative profile cards.
+- [x] Implement dataset-backed investor browsing with search, filtering, and informative profile cards.
+- [x] Implement authenticated watchlist and saved-match workflows.
+- [x] Implement owner-only data administration access controls and UI states.
+- [x] Implement LLM-powered ranked startup–investor matching with human-readable compatibility explanations.
+- [x] Implement side-by-side match detail views with strengths, gaps, and suggested talking points.
+- [x] Implement LLM-powered natural-language profile search with ranked results.
+- [x] Build a polished, responsive Manus-inspired dashboard shell with sidebar navigation, hero workspace, and quick actions.
+- [x] Add loading, empty, failure, and access-denied states across user workflows.
+- [x] Complete explicit query-error and zero-result states for the remaining dashboard, saved, administration, and matching flows.
+- [x] Add a visible dashboard dataset-count failure state with recovery guidance.
+- [x] Add Vitest coverage for access control, filtering, saved items, matching, and smart search behavior.
+- [x] Expand router-level Vitest coverage for browsing filters, saved workflows, smart search, ranked matching, and detail briefs.
+- [x] Validate desktop and mobile layouts, resolve errors, and preserve data-source integrity.
+- [x] Clear the stale development-server import diagnostic and re-verify the live runtime.
+- [x] Avoid displaying transient zero profile counts while dashboard data is loading.
+- [x] Confirm a clean post-restart runtime pass without current module-import errors.
