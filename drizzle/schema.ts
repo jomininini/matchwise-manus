@@ -1,5 +1,6 @@
 import {
   boolean,
+  customType,
   index,
   int,
   json,
@@ -12,6 +13,18 @@ import {
   uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
+
+const vector1024 = customType<{ data: string; driverData: string }>({
+  dataType() {
+    return "VECTOR(1024)";
+  },
+  toDriver(value) {
+    return value;
+  },
+  fromDriver(value) {
+    return value;
+  },
+});
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -66,6 +79,24 @@ export const datasetImports = mysqlTable("datasetImports", {
   completedAt: timestamp("completedAt"),
 });
 
+export const companyEmbeddings = mysqlTable(
+  "companyEmbeddings",
+  {
+    id: varchar("id", { length: 96 }).primaryKey(),
+    profileId: varchar("profileId", { length: 96 }).notNull(),
+    model: varchar("model", { length: 128 }).notNull(),
+    inputHash: varchar("inputHash", { length: 64 }).notNull(),
+    embedding: vector1024("embedding").notNull(),
+    importBatchId: varchar("importBatchId", { length: 96 }).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    uniqueIndex("company_embeddings_profile_unique").on(table.profileId),
+    index("company_embeddings_import_idx").on(table.importBatchId),
+  ],
+);
+
 export const savedItems = mysqlTable(
   "savedItems",
   {
@@ -91,3 +122,4 @@ export type InsertUser = typeof users.$inferInsert;
 export type Profile = typeof profiles.$inferSelect;
 export type ProfileSourceType = Profile["sourceType"];
 export type SavedItem = typeof savedItems.$inferSelect;
+export type CompanyEmbedding = typeof companyEmbeddings.$inferSelect;

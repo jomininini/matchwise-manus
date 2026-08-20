@@ -1,6 +1,7 @@
-import { and, asc, count, desc, eq, inArray, like, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, like, notInArray, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
+  companyEmbeddings,
   datasetImports,
   InsertUser,
   profiles,
@@ -10,6 +11,7 @@ import {
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import type { NormalizedProfileInput, SourceType } from "./profileImport";
+import type { CompanyEmbeddingInput } from "./companyDirectory";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -103,6 +105,29 @@ export async function listProfilesByTypes(sourceTypes: ProfileSourceType[]) {
   return db.select().from(profiles).where(inArray(profiles.sourceType, sourceTypes));
 }
 
+export async function searchCompanyVectors(queryEmbedding: string, limit: number) {
+  const db = await getDb();
+  if (!db) return [] as Array<{ profileId: string; similarity: number }>;
+  const result = await db.execute(sql`
+    SELECT e.profileId AS profileId,
+           1 - VEC_COSINE_DISTANCE(e.embedding, ${queryEmbedding}) AS similarity
+    FROM companyEmbeddings e
+    INNER JOIN profiles p ON p.id = e.profileId
+    WHERE p.sourceType = 'company'
+    ORDER BY VEC_COSINE_DISTANCE(e.embedding, ${queryEmbedding}) ASC
+    LIMIT ${limit}
+  `) as unknown;
+  const rows = Array.isArray(result) ? (Array.isArray(result[0]) ? result[0] : result) : (result as { rows?: unknown[] }).rows ?? [];
+  return (rows as Array<{ profileId: string; similarity: number | string }>).map(row => ({ profileId: row.profileId, similarity: Number(row.similarity) }));
+}
+
+export async function getCompanyEmbeddingHashes() {
+  const db = await getDb();
+  if (!db) return new Map<string, string>();
+  const rows = await db.select({ profileId: companyEmbeddings.profileId, inputHash: companyEmbeddings.inputHash }).from(companyEmbeddings);
+  return new Map(rows.map(row => [row.profileId, row.inputHash]));
+}
+
 export async function profileCounts() {
   const db = await getDb();
   if (!db) return { company: 0, solution: 0, investor: 0 };
@@ -143,6 +168,40 @@ export async function replaceDataset(
       .update(datasetImports)
       .set({ status: "failed", errorMessage: error instanceof Error ? error.message : "Dataset import failed", completedAt: new Date() })
       .where(eq(datasetImports.id, importBatch.id));
+    throw error;
+  }
+}
+
+export async function replaceCompanyDatasetWithEmbeddings(
+  importBatch: { id: string; fileName: string; fileKey?: string | null; importedBy: number },
+  incomingProfiles: NormalizedProfileInput[],
+  embeddings: CompanyEmbeddingInput[],
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is unavailable");
+
+  await db.insert(datasetImports).values({ id: importBatch.id, sourceType: "company", fileName: importBatch.fileName, fileKey: importBatch.fileKey ?? null, importedBy: importBatch.importedBy, status: "processing" });
+  try {
+    const incomingIds = incomingProfiles.map(profile => profile.id);
+    if (!incomingIds.length) throw new Error("Official company directory cannot be empty");
+    await db.delete(companyEmbeddings).where(notInArray(companyEmbeddings.profileId, incomingIds));
+    await db.delete(profiles).where(and(eq(profiles.sourceType, "company"), notInArray(profiles.id, incomingIds)));
+    const chunkSize = 120;
+    for (let offset = 0; offset < incomingProfiles.length; offset += chunkSize) {
+      const profileChunk = incomingProfiles.slice(offset, offset + chunkSize);
+      await db.insert(profiles).values(profileChunk).onDuplicateKeyUpdate({ set: {
+        name: sql`VALUES(name)`, website: sql`VALUES(website)`, sector: sql`VALUES(sector)`, technology: sql`VALUES(technology)`, description: sql`VALUES(description)`, normalizedText: sql`VALUES(normalizedText)`, rawData: sql`VALUES(rawData)`, importBatchId: importBatch.id,
+      } });
+    }
+    for (let offset = 0; offset < embeddings.length; offset += chunkSize) {
+      const embeddingChunk = embeddings.slice(offset, offset + chunkSize);
+      await db.insert(companyEmbeddings).values(embeddingChunk).onDuplicateKeyUpdate({ set: {
+        model: sql`VALUES(model)`, inputHash: sql`VALUES(inputHash)`, embedding: sql`VALUES(embedding)`, importBatchId: importBatch.id,
+      } });
+    }
+    await db.update(datasetImports).set({ status: "ready", recordCount: incomingProfiles.length, completedAt: new Date() }).where(eq(datasetImports.id, importBatch.id));
+  } catch (error) {
+    await db.update(datasetImports).set({ status: "failed", errorMessage: error instanceof Error ? error.message : "Official company import failed", completedAt: new Date() }).where(eq(datasetImports.id, importBatch.id));
     throw error;
   }
 }

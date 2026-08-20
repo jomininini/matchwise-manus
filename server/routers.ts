@@ -1,44 +1,38 @@
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { datasetImports, type ProfileSourceType } from "../drizzle/schema";
+import { ENV } from "./_core/env";
+import { getSessionCookieOptions } from "./_core/cookies";
+import { systemRouter } from "./_core/systemRouter";
+import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
   browseProfiles,
-  getDb,
+  getCompanyEmbeddingHashes,
   getProfile,
   getProfilesByIds,
   isProfileSaved,
   listDatasetImports,
-  listProfilesByTypes,
   listSavedItems,
   profileCounts,
-  replaceDataset,
-  saveMatch,
+  replaceCompanyDatasetWithEmbeddings,
+  searchCompanyVectors,
   toggleSavedProfile,
 } from "./db";
-import { analyzeMatch, oppositeTypes, rankProfiles } from "./matching";
-import { ENV } from "./_core/env";
-import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "./_core/cookies";
-import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { normalizeCsvDataset, type SourceType } from "./profileImport";
+import { analyzeCompanyCandidate, refineCompanyStatement } from "./companyMatch";
+import { companyEmbeddingSignature, embedCompanyProfiles, embedText, fetchOfficialCompanyDirectory } from "./companyDirectory";
+import { normalizeOfficialCompanyRecords, officialRecordsToCsv } from "./profileImport";
 import { storagePut } from "./storage";
-
-const sourceTypeSchema = z.enum(["company", "solution", "investor"]);
+import { COOKIE_NAME } from "@shared/const";
 
 const ownerProcedure = protectedProcedure.use(({ ctx, next }) => {
-  if (ctx.user.openId !== ENV.ownerOpenId && ctx.user.role !== "admin") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "This workspace area is restricted to the project owner." });
-  }
+  if (ctx.user.openId !== ENV.ownerOpenId && ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "This workspace area is restricted to the project owner." });
   return next();
 });
 
-function decodeCsv(base64Csv: string) {
-  const csv = Buffer.from(base64Csv, "base64").toString("utf8");
-  if (!csv.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "The uploaded dataset was empty." });
-  return csv;
+async function getCompanyOrThrow(profileId: string) {
+  const profile = await getProfile(profileId);
+  if (!profile || profile.sourceType !== "company") throw new TRPCError({ code: "NOT_FOUND", message: "The requested company profile is unavailable." });
+  return profile;
 }
 
 export const appRouter = router({
@@ -51,73 +45,51 @@ export const appRouter = router({
     }),
   }),
   profiles: router({
-    counts: publicProcedure.query(() => profileCounts()),
+    counts: publicProcedure.query(async () => ({ company: (await profileCounts()).company })),
     browse: publicProcedure
-      .input(z.object({ sourceType: sourceTypeSchema, query: z.string().max(180).optional(), sector: z.string().max(180).optional(), page: z.number().int().positive().optional(), pageSize: z.number().int().positive().max(60).optional() }))
-      .query(({ input }) => browseProfiles(input)),
-    byId: publicProcedure.input(z.object({ profileId: z.string().min(1).max(96) })).query(({ input }) => getProfile(input.profileId)),
-    byIds: publicProcedure.input(z.object({ profileIds: z.array(z.string().min(1).max(96)).max(60) })).query(({ input }) => getProfilesByIds(input.profileIds)),
-    savedStatus: protectedProcedure.input(z.object({ profileId: z.string().min(1).max(96) })).query(({ ctx, input }) => isProfileSaved(ctx.user.id, input.profileId)),
-    toggleSaved: protectedProcedure.input(z.object({ profileId: z.string().min(1).max(96) })).mutation(({ ctx, input }) => toggleSavedProfile(ctx.user.id, input.profileId, nanoid(18))),
+      .input(z.object({ query: z.string().max(180).optional(), sector: z.string().max(180).optional(), page: z.number().int().positive().optional(), pageSize: z.number().int().positive().max(60).optional() }))
+      .query(({ input }) => browseProfiles({ ...input, sourceType: "company" })),
+    byId: publicProcedure.input(z.object({ profileId: z.string().min(1).max(96) })).query(({ input }) => getCompanyOrThrow(input.profileId)),
+    byIds: publicProcedure.input(z.object({ profileIds: z.array(z.string().min(1).max(96)).max(60) })).query(async ({ input }) => (await getProfilesByIds(input.profileIds)).filter(profile => profile.sourceType === "company")),
+    savedStatus: protectedProcedure.input(z.object({ profileId: z.string().min(1).max(96) })).query(async ({ ctx, input }) => { await getCompanyOrThrow(input.profileId); return isProfileSaved(ctx.user.id, input.profileId); }),
+    toggleSaved: protectedProcedure.input(z.object({ profileId: z.string().min(1).max(96) })).mutation(async ({ ctx, input }) => { await getCompanyOrThrow(input.profileId); return toggleSavedProfile(ctx.user.id, input.profileId, nanoid(18)); }),
   }),
   saved: router({
-    list: protectedProcedure.query(({ ctx }) => listSavedItems(ctx.user.id)),
-    saveMatch: protectedProcedure
-      .input(z.object({ sourceProfileId: z.string().min(1).max(96), targetProfileId: z.string().min(1).max(96), matchScore: z.number().int().min(0).max(100), matchSummary: z.string().min(1).max(20_000) }))
-      .mutation(({ ctx, input }) => saveMatch({ id: nanoid(18), userId: ctx.user.id, ...input })),
+    list: protectedProcedure.query(async ({ ctx }) => (await listSavedItems(ctx.user.id)).filter(item => item.itemType === "profile")),
   }),
-  matching: router({
-    ranked: publicProcedure
-      .input(z.object({ sourceProfileId: z.string().min(1).max(96) }))
+  companyMatch: router({
+    refine: publicProcedure.input(z.object({ statement: z.string().min(8).max(4000) })).mutation(({ input }) => refineCompanyStatement(input.statement)),
+    match: publicProcedure
+      .input(z.object({ refinedStatement: z.string().min(8).max(4000), topK: z.number().int().min(1).max(30).default(10) }))
       .mutation(async ({ input }) => {
-        const source = await getProfile(input.sourceProfileId);
-        if (!source) throw new TRPCError({ code: "NOT_FOUND", message: "The source profile is no longer available." });
-        const candidateTypes: ProfileSourceType[] = [...oppositeTypes(source.sourceType)];
-        const candidates = await listProfilesByTypes(candidateTypes);
-        const results = await rankProfiles(source.normalizedText, candidates, `Find the strongest ${source.sourceType === "investor" ? "HKSTP startup" : "investor"} matches for this profile.`);
-        const rankedProfiles = await getProfilesByIds(results.map(result => result.profileId));
-        return results.map(result => ({ ...result, profile: rankedProfiles.find(profile => profile.id === result.profileId) })).filter(result => result.profile);
-      }),
-    detail: publicProcedure
-      .input(z.object({ sourceProfileId: z.string().min(1).max(96), targetProfileId: z.string().min(1).max(96) }))
-      .mutation(async ({ input }) => {
-        const [source, target] = await Promise.all([getProfile(input.sourceProfileId), getProfile(input.targetProfileId)]);
-        if (!source || !target) throw new TRPCError({ code: "NOT_FOUND", message: "One or both profiles are unavailable." });
-        const expectedTypes: ProfileSourceType[] = [...oppositeTypes(source.sourceType)];
-        if (!expectedTypes.includes(target.sourceType)) throw new TRPCError({ code: "BAD_REQUEST", message: "Select a startup and investor profile for a comparison." });
-        const analysis = await analyzeMatch(source, target);
-        return { source, target, analysis };
-      }),
-    smartSearch: publicProcedure
-      .input(z.object({ query: z.string().min(4).max(1400), target: z.enum(["startup", "investor", "solution"]) }))
-      .mutation(async ({ input }) => {
-        const sourceTypes: ProfileSourceType[] = input.target === "startup" ? ["company"] : input.target === "solution" ? ["solution"] : ["investor"];
-        const candidates = await listProfilesByTypes(sourceTypes);
-        const results = await rankProfiles(input.query, candidates, `Find the best ${input.target} profiles for this natural-language request.`);
-        const rankedProfiles = await getProfilesByIds(results.map(result => result.profileId));
-        return results.map(result => ({ ...result, profile: rankedProfiles.find(profile => profile.id === result.profileId) })).filter(result => result.profile);
+        const queryEmbedding = await embedText(input.refinedStatement);
+        const nearest = await searchCompanyVectors(queryEmbedding, Math.min(60, Math.max(input.topK * 2, 16)));
+        const profilesById = new Map((await getProfilesByIds(nearest.map(item => item.profileId))).filter(profile => profile.sourceType === "company").map(profile => [profile.id, profile]));
+        const candidates = nearest.map(item => ({ ...item, profile: profilesById.get(item.profileId) })).filter((item): item is typeof item & { profile: NonNullable<typeof item.profile> } => Boolean(item.profile));
+        const analyzed: Array<{ profile: NonNullable<(typeof candidates)[number]["profile"]>; semanticSimilarity: number; analysis: Awaited<ReturnType<typeof analyzeCompanyCandidate>> }> = [];
+        for (let offset = 0; offset < candidates.length; offset += 3) {
+          const group = await Promise.all(candidates.slice(offset, offset + 3).map(async candidate => ({ profile: candidate.profile, semanticSimilarity: candidate.similarity, analysis: await analyzeCompanyCandidate(input.refinedStatement, candidate.profile, candidate.similarity) })));
+          analyzed.push(...group);
+        }
+        const matches = analyzed.filter(item => item.analysis.isSuitable && item.analysis.score >= 55).sort((a, b) => b.analysis.score - a.analysis.score || b.semanticSimilarity - a.semanticSimilarity).slice(0, input.topK);
+        return { refinedStatement: input.refinedStatement, requestedTopK: input.topK, vectorCandidates: candidates.length, excludedCount: analyzed.length - matches.length, matches };
       }),
   }),
   admin: router({
-    imports: ownerProcedure.query(() => listDatasetImports()),
-    importCsv: ownerProcedure
-      .input(z.object({ sourceType: sourceTypeSchema, fileName: z.string().min(1).max(512), base64Csv: z.string().min(1).max(60_000_000) }))
-      .mutation(async ({ ctx, input }) => {
-        const csv = decodeCsv(input.base64Csv);
-        const batchId = nanoid(18);
-        const { key } = await storagePut(`datasets/${batchId}-${input.fileName}`, Buffer.from(csv, "utf8"), "text/csv");
-        const normalized = normalizeCsvDataset(input.sourceType as SourceType, csv, batchId);
-        await replaceDataset(input.sourceType as SourceType, { id: batchId, fileName: input.fileName, fileKey: key, importedBy: ctx.user.id }, normalized);
-        return { batchId, recordCount: normalized.length };
-      }),
-    removeImport: ownerProcedure
-      .input(z.object({ importId: z.string().min(1).max(96) }))
-      .mutation(async ({ input }) => {
-        const db = await getDb();
-        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database is unavailable." });
-        await db.delete(datasetImports).where(eq(datasetImports.id, input.importId));
-        return { success: true };
-      }),
+    imports: ownerProcedure.query(async () => (await listDatasetImports()).filter(item => item.sourceType === "company")),
+    refreshOfficialCompanies: ownerProcedure.mutation(async ({ ctx }) => {
+      const batchId = nanoid(18);
+      const records = await fetchOfficialCompanyDirectory();
+      if (!records.length) throw new TRPCError({ code: "BAD_GATEWAY", message: "The official HKSTP API returned no company records." });
+      const csv = officialRecordsToCsv(records);
+      const { key } = await storagePut(`datasets/${batchId}-hkstp-company-directory.csv`, Buffer.from(csv, "utf8"), "text/csv");
+      const companies = normalizeOfficialCompanyRecords(records, batchId);
+      const existingHashes = await getCompanyEmbeddingHashes();
+      const changedCompanies = companies.filter(company => existingHashes.get(company.id) !== companyEmbeddingSignature(company).inputHash);
+      const embeddings = await embedCompanyProfiles(changedCompanies, batchId);
+      await replaceCompanyDatasetWithEmbeddings({ id: batchId, fileName: "hkstp-company-directory.csv", fileKey: key, importedBy: ctx.user.id }, companies, embeddings);
+      return { batchId, recordCount: companies.length, reembeddedCount: embeddings.length, embeddingModel: embeddings[0]?.model ?? "baai/bge-m3" };
+    }),
   }),
 });
 

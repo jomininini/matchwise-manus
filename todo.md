@@ -20,3 +20,19 @@
 - [x] Clear the stale development-server import diagnostic and re-verify the live runtime.
 - [x] Avoid displaying transient zero profile counts while dashboard data is loading.
 - [x] Confirm a clean post-restart runtime pass without current module-import errors.
+- [x] 移除 solution 与 investor 浏览、匹配和管理工作流，仅保留 Company Match。
+- [x] 检查并接入 data.gov.hk 的官方 HKSTP 公司目录标准数据接口。
+- [x] 将官方接口数据解析、标准化并可导出为可追溯的 CSV 数据集。
+- [x] 为每家公司的规范化资料生成持久化向量，并实现增量更新与版本追踪。
+- [x] 使用 LLM 优化用户输入并返回可编辑的 refined statement。
+- [x] 将 refined statement 向量化，按语义相似度检索公司，默认返回 Top 10 且支持修改数量。
+- [x] 对候选公司逐条进行 LLM 匹配分析，在存在重要资料缺口时生成受控的外部核验查询，并剔除不适合结果。
+- [x] 提供详细、可解释且可导出的 Company Match 结果。
+- [x] 将前端重构为聚焦 Company Match 的精简工作流并覆盖关键状态。
+- [x] 为官方数据导入、向量检索、Top-K、分析筛除与结果导出添加测试和验证。
+- [x] 彻底删除或禁用 solution/investor 的后端导入、匹配与对外资料查询能力。
+- [x] 为 Company Match 路由添加 refine、Top-K、筛除和结果结构的 Vitest 覆盖。
+- [x] 以非默认 Top-K 执行可复现端到端验证，确认结果数量遵循用户配置。
+- [x] 使用 OpenRouter API 生成并验证公司与 refined statement 的 embedding 向量，不再依赖 OpenAI 连接器。
+- [x] 实现真正的增量向量更新：仅重嵌入新增或发生变更的官方公司资料。
+- [x] 验证 refined statement 经 OpenRouter 向量化后可完成 TiDB 余弦检索与 Company Match 分析。

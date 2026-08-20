@@ -1,4 +1,5 @@
 import { parse } from "csv-parse/sync";
+import { createHash } from "node:crypto";
 
 export type SourceType = "company" | "solution" | "investor";
 export type CsvRecord = Record<string, string>;
@@ -137,4 +138,30 @@ export function normalizeCsvDataset(
   return parseCsvDataset(csv).map((record, index) =>
     normalizeDatasetRecord(sourceType, record, index, importBatchId),
   );
+}
+
+export type OfficialCompanyRecord = Record<string, string | null | undefined>;
+
+function stableCompanyKey(record: OfficialCompanyRecord, rowIndex: number) {
+  const seed = clean([record.name_EN, record.name_TC, record.name_SC, record.website].filter(Boolean).join("|")) || `row-${rowIndex + 1}`;
+  return `company-${createHash("sha256").update(seed).digest("hex").slice(0, 24)}`;
+}
+
+export function normalizeOfficialCompanyRecords(records: OfficialCompanyRecord[], importBatchId: string): NormalizedProfileInput[] {
+  return records.map((officialRecord, rowIndex) => {
+    const record = Object.fromEntries(Object.entries(officialRecord).map(([key, value]) => [key, clean(value)]));
+    const profile = normalizeDatasetRecord("company", record, rowIndex, importBatchId);
+    const id = stableCompanyKey(officialRecord, rowIndex);
+    return { ...profile, id, recordKey: id, rawData: record };
+  });
+}
+
+function csvCell(value: unknown) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+export function officialRecordsToCsv(records: OfficialCompanyRecord[]) {
+  const columns = Array.from(new Set(records.flatMap(record => Object.keys(record))));
+  return [columns.join(","), ...records.map(record => columns.map(column => csvCell(record[column])).join(","))].join("\n");
 }

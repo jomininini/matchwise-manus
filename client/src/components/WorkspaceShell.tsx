@@ -21,10 +21,8 @@ import { useState } from "react";
 import { Link, useLocation } from "wouter";
 
 const navItems = [
-  { icon: LayoutDashboard, label: "Overview", path: "/" },
-  { icon: Building2, label: "Startups", path: "/profiles?type=company" },
-  { icon: Network, label: "Investors", path: "/profiles?type=investor" },
-  { icon: Search, label: "Smart search", path: "/match" },
+  { icon: LayoutDashboard, label: "Company Match", path: "/company-match" },
+  { icon: Building2, label: "Company directory", path: "/profiles?type=company" },
   { icon: Bookmark, label: "Saved", path: "/saved" },
 ];
 
